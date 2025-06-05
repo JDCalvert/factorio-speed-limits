@@ -1,5 +1,3 @@
-local LOG_DEBUG = true
-
 local speed_signal = {
     type = "virtual",
     name = "signal-speed"
@@ -10,12 +8,6 @@ local rail_connection_directions = {
     defines.rail_connection_direction.left,
     defines.rail_connection_direction.right
 }
-
-function debug(str)
-    if LOG_DEBUG then
-        game.print(str)
-    end
-end
 
 function get_reverse_direction(direction)
     if direction == defines.rail_direction.front then
@@ -57,12 +49,8 @@ function handle_found_signal(train_info, start_rail_end, rail_end, signal)
 
         local pathfinder_result = game.train_manager.request_train_path(params)
 
-        speed_message = "with speedlimit=" .. speed_limit
-
         local new_path_length = 0
         if pathfinder_result.found_path then
-            speed_message = speed_message .. " and path was found distance=" .. pathfinder_result.total_length
-
             -- Insert into the speed_limits array this speed limit, and how far along the train's actual path it applies
             table.insert(
                 train_info.speed_limits, {
@@ -71,11 +59,7 @@ function handle_found_signal(train_info, start_rail_end, rail_end, signal)
                 }
             )
         end
-    else
-        speed_message = "with no speedlimit"
     end
-
-    debug("found signal at {" .. signal.position.x .. "," .. signal.position.y .. "} " .. speed_message)
 end
 
 function register_train(train)
@@ -84,7 +68,8 @@ function register_train(train)
         deceleration_rate = calculate_deceleration(train),
         path = train.path,
         path_length = train.path.total_distance,
-        speed_limits = {}
+        speed_limits = {},
+        pending_speed_limits = {}
     }
 
     calculate_acceleration(train_info)
@@ -94,11 +79,11 @@ function register_train(train)
         train_length = train_length + rolling_stock.prototype.joint_distance +
                            rolling_stock.prototype.connection_distance
     end
+    train_info.train_length = train_length
 
     find_signals(train_info)
 
     storage.trains[train.id] = train_info
-    debug("register train id=" .. train.id .. " train_length=" .. train_length)
 end
 
 function calculate_acceleration(train_info)
@@ -235,9 +220,6 @@ function find_signals(trainInfo)
 end
 
 function unregister_train(train)
-    if storage.trains[train.id] ~= nil then
-        debug("unregister train id=" .. train.id)
-    end
     storage.trains[train.id] = nil
 end
 
@@ -342,8 +324,32 @@ script.on_event(
 
                 -- If we're past the speed limit, set the speed of the train to be the limit
                 if distance_to_speed_limit <= 0 then
+                    if train_info.current_speed_limit == nil or speed_limit_info.speed_limit < train_info.current_speed_limit then
+                        train_info.pending_speed_limits = {}
+                        train_info.current_speed_limit = speed_limit_info.speed_limit
+                    else
+                        -- Remove any pending speed limits higher than this one
+                        for i, pending_speed_limit_info in pairs(train_info.pending_speed_limits) do
+                            if pending_speed_limit_info.speed_limit > speed_limit_info.speed_limit then
+                                table.remove(train_info.pending_speed_limits, i)
+                            end
+                        end
+
+                        -- Add this as a pending speed limit
+                        table.insert(train_info.pending_speed_limits, speed_limit_info)
+                    end
+
                     table.remove(train_info.speed_limits, i)
-                    train_info.current_speed_limit = speed_limit_info.speed_limit
+                end
+            end
+
+            for i, pending_speed_limit_info in pairs(train_info.pending_speed_limits) do
+                local speed_limit_tick = pending_speed_limit_info.speed_limit / 216 -- km/h -> m/tick
+
+                local distance_past_speed_limit =  path.travelled_distance - pending_speed_limit_info.distance
+                if distance_past_speed_limit > train_info.train_length then
+                    table.remove(train_info.pending_speed_limits, i)
+                    train_info.current_speed_limit = pending_speed_limit_info.speed_limit
                 end
             end
 
