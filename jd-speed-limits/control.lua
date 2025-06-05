@@ -79,27 +79,26 @@ function handle_found_signal(train_info, start_rail_end, rail_end, signal)
 end
 
 function register_train(train)
-    local path = train.path
-
-    if path.size < 2 then
-        return
-    end
-
     local train_info = {
         train = train,
         deceleration_rate = calculate_deceleration(train),
         path = train.path,
         path_length = train.path.total_distance,
-        speed_limits = {},
-        current_speed = train.speed
+        speed_limits = {}
     }
 
     calculate_acceleration(train_info)
 
+    local train_length = 0
+    for _, rolling_stock in ipairs(train.carriages) do
+        train_length = train_length + rolling_stock.prototype.joint_distance +
+                           rolling_stock.prototype.connection_distance
+    end
+
     find_signals(train_info)
 
     storage.trains[train.id] = train_info
-    debug("register train id=" .. train.id .. " path_length=" .. train.path.total_distance)
+    debug("register train id=" .. train.id .. " train_length=" .. train_length)
 end
 
 function calculate_acceleration(train_info)
@@ -112,33 +111,43 @@ function calculate_acceleration(train_info)
     end
 
     -- Add up power of locomotives, in J/tick
-    local total_forward_power = calculate_power(train.locomotives.front_movers)
-    local total_backward_power = calculate_power(train.locomotives.back_movers)
+    local total_forward_power, forward_locomotives = calculate_power(train.locomotives.front_movers)
+    local total_backward_power, backward_locomotives = calculate_power(train.locomotives.back_movers)
 
     train_info.forward = {
         power = total_forward_power,
+        locomotives = forward_locomotives,
         air_resistance_multiplier = 1 - 1000 * train.front_stock.prototype.air_resistance / train.weight,
         forward_force = (total_forward_power / 1000 - total_friction_force) / train.weight
     }
     train_info.backward = {
         power = total_backward_power,
+        locomotives = backward_locomotives,
         air_resistance_multiplier = 1 - 1000 * train.back_stock.prototype.air_resistance / train.weight,
         forward_force = (total_backward_power / 1000 - total_friction_force) / train.weight
     }
+    train_info.friction_force = total_friction_force
 end
 
 function calculate_power(locomotives)
     local total_power = 0
+    local locomotive_info = {}
     for i, locomotive in ipairs(locomotives) do
         local fuel = locomotive.burner.currently_burning
         if fuel then
-            total_power = total_power + locomotive.prototype.get_max_energy_usage() *
+            local energy_usage = locomotive.prototype.get_max_energy_usage()
+
+            total_power = total_power + energy_usage *
                               (fuel.name.fuel_acceleration_multiplier +
                                   fuel.name.fuel_acceleration_multiplier_quality_bonus * fuel.quality.level)
+            locomotive_info[i] = {
+                energy_usage = energy_usage,
+                burner = locomotive.burner
+            }
         end
     end
 
-    return total_power
+    return total_power, locomotive_info
 end
 
 function calculate_deceleration(train)
@@ -155,10 +164,6 @@ end
 function find_signals(trainInfo)
     local train = trainInfo.train
     local path = train.path
-
-    if path.size < 2 then
-        return
-    end
 
     -- find the path's direction
     local rail_end
@@ -315,15 +320,23 @@ script.on_event(
 
                 local distance_to_speed_limit = speed_limit_info.distance - path.travelled_distance
 
-                -- If we're approaching the speed limit, slow down the train
-                if target_speed_tick > speed_limit_tick then
-                    -- S = (V^2 - U^2) / 2A
-                    local deceleration_distance = (train_speed_tick ^ 2 - speed_limit_tick ^ 2) /
-                                                      (2 * train_info.deceleration_rate)
+                -- Once we've already started decelerating towards a new speed limit, don't keep checking
+                -- if we need to decelerate
+                if speed_limit_info.approaching then
+                    requireBraking = true
+                    target_speed_tick = speed_limit_tick
+                else
+                    -- If we're approaching the speed limit, slow down the train
+                    if target_speed_tick > speed_limit_tick then
+                        -- S = (V^2 - U^2) / 2A
+                        local deceleration_distance = (train_speed_tick ^ 2 - speed_limit_tick ^ 2) /
+                                                          (2 * train_info.deceleration_rate)
 
-                    if distance_to_speed_limit < deceleration_distance + 5 then
-                        requireBraking = true
-                        target_speed_tick = speed_limit_tick
+                        if distance_to_speed_limit < deceleration_distance + 5 then
+                            requireBraking = true
+                            target_speed_tick = speed_limit_tick
+                            speed_limit_info.approaching = true
+                        end
                     end
                 end
 
@@ -347,10 +360,23 @@ script.on_event(
             if requireBraking then
                 local new_speed_tick = math.max(train_speed_tick - train_info.deceleration_rate, target_speed_tick)
 
-                -- Account for the game continuing to accelerate the train after we set its speed
+                local energy_usage = (train.weight *
+                                         (new_speed_tick / direction_acceleration.air_resistance_multiplier -
+                                             train_speed_tick) + train_info.friction_force) * 1000
+                energy_usage = math.max(energy_usage, 0)
+
+                local energy_use_proportion = energy_usage / direction_acceleration.power
+
+                -- Go through each locomotive and give back the energy that the game will use, and take away the actual energy usage
+                for _, locomotive in ipairs(direction_acceleration.locomotives) do
+                    locomotive.burner.remaining_burning_fuel = locomotive.burner.remaining_burning_fuel +
+                                                                   (1 - energy_use_proportion) * locomotive.energy_usage
+                end
+
+                -- The game will continue to accelerate the train after we set its speed
                 -- Set the speed such that the game's acceleration results in our desired speed
-                local new_speed_tick = new_speed_tick / direction_acceleration.air_resistance_multiplier -
-                                           direction_acceleration.forward_force
+                new_speed_tick = new_speed_tick / direction_acceleration.air_resistance_multiplier -
+                                     direction_acceleration.forward_force
 
                 train.speed = new_speed_tick * train_direction
             end
