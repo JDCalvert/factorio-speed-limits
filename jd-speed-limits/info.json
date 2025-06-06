@@ -5,7 +5,7 @@
     "title": "JD's Speed Limits",
     "author": "JDCalvert",
     "description": "Allow limiting the speed of trains on certain sections of track.",
-    "homepage": "",
+    "homepage": "https://mods.factorio.com/user/jdcalvert",
     "source": "https://github.com/JDCalvert/factorio-speed-limits",
     "dependencies": [
         "base"
