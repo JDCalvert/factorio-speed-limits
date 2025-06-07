@@ -1,5 +1,14 @@
 ---------------------------------------------------------------------------------------------------
+Version: 1.0.1
+Date: 2025-06-07
+  Fixes:
+    - Trains respect speed limits they pass while slowing towards signals or stations.
+    - Trains correctly handle increased speed limits which take effect just as the train arrives at a station.
+---------------------------------------------------------------------------------------------------
 Version: 1.0.0
-Date: 2025-06-02
+Date: 2025-06-06
   Features:
-    - Initial release
+    - Trains respect speed limits while on path.
+    - Trains reduce speed on approach to lower speed limit.
+    - Trains remember last speed limit between paths.
+    - Fuel usage is reduced while travelling at reduced speed limit.

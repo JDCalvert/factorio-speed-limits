@@ -30,12 +30,19 @@ function calculate_derived(train_info)
 
     local total_braking_force = 0
 
-    for _, rolling_stock in ipairs(train.carriages) do
+    for i, rolling_stock in ipairs(train.carriages) do
         local prototype = rolling_stock.prototype
 
         train_info.friction_force = train_info.friction_force + prototype.friction_force
         total_braking_force = total_braking_force + prototype.braking_force
-        train_info.length = train_info.length + prototype.joint_distance + prototype.connection_distance
+
+        -- The distance between rolling stock is half the connection distances of each of the connected stock.
+        -- For any rolling stock that is only connected at one end, only count the connection on that end.
+        if i == 1 or i == #train.carriages then
+            train_info.length = train_info.length + prototype.joint_distance + prototype.connection_distance / 2
+        else
+            train_info.length = train_info.length + prototype.joint_distance + prototype.connection_distance
+        end
     end
 
     train_info.deceleration_rate = total_braking_force * force.train_braking_force_bonus / train.weight
