@@ -1,6 +1,11 @@
 require("scripts.train")
 require("scripts.path")
 
+local idle_smoke = {
+    type = "idle",
+    intensity = 5
+}
+
 -- When we first start the mod, register all trains that currently have a path
 script.on_init(
     function()
@@ -20,6 +25,9 @@ script.on_init(
 script.on_configuration_changed(
     function()
         for _, train_info in pairs(storage.trains) do
+            train_info.current_speed = math.abs(train_info.train.speed)
+            train_info.smoke = idle_smoke
+
             calculate_derived(train_info)
         end
     end
@@ -88,18 +96,52 @@ script.on_event(
 
         for _, train_info in pairs(storage.trains) do
             handle_train(train_info)
+            create_smoke(train_info)
         end
     end
 )
 
 -- Check if we need to slow the train down for speed limits
 function handle_train(train_info)
-    -- Ignore trains that don't have a path, including manually-driven trains
+    local train = train_info.train
+
+    local train_speed_tick = math.abs(train.speed)
+
+    local train_direction = 1
+    local direction = train_info.forward
+    if train.speed < 0 then
+        train_direction = -1
+        direction = train_info.backward
+    end
+
+    -- Default smoke to idle
+    train_info.smoke = idle_smoke
+
+    local previous_speed = train_info.current_speed
+    train_info.current_speed = train_speed_tick
+
+    -- For trains in manual mode, calculate their smoke based on their
+    if train.manual_mode then
+        if train_speed_tick > previous_speed then
+            train_info.smoke = {
+                type = "working",
+                intensity = 100
+            }
+        elseif train_speed_tick == previous_speed and train_speed_tick > 0 then
+            train_info.smoke = {
+                type = "working",
+                intensity = 100 * calculate_power_proportion(train_info, direction, previous_speed, train_speed_tick)
+            }
+        end
+
+        return
+    end
+
+    -- Ignore trains that don't have a path
     if train_info.path_info == nil then
         return
     end
 
-    local train = train_info.train
     local path_info = train_info.path_info
 
     -- Calculate if we've gone past a speed limit sign.
@@ -144,6 +186,12 @@ function handle_train(train_info)
     if train.state ~= defines.train_state.on_the_path then
         return
     end
+
+    -- For train on the path, assume they're working at full power until we find otherwise
+    train_info.smoke = {
+        type = "working",
+        intensity = 100
+    }
 
     local train_speed_tick = math.abs(train.speed)
 
@@ -200,17 +248,21 @@ function handle_train(train_info)
         local new_speed_tick = math.max(train_speed_tick - train_info.deceleration_rate, target_speed_tick)
 
         if direction.power > 0 then
-            local energy_usage = (train.weight *
-                                     (new_speed_tick / direction.air_resistance_multiplier - train_speed_tick) +
-                                     train_info.friction_force) * 1000
-            energy_usage = math.max(energy_usage, 0)
-
-            local energy_use_proportion = energy_usage / direction.power
+            local power_use = calculate_power_proportion(train_info, direction, train_speed_tick, new_speed_tick)
 
             -- Go through each locomotive and give back the energy that the game will use, and take away the actual energy usage
             for _, locomotive in ipairs(direction.locomotives) do
-                locomotive.burner.remaining_burning_fuel = locomotive.burner.remaining_burning_fuel +
-                                                               (1 - energy_use_proportion) * locomotive.energy_usage
+                locomotive.burner.remaining_burning_fuel = locomotive.burner.remaining_burning_fuel + (1 - power_use) *
+                                                               locomotive.energy_usage
+            end
+
+            if power_use > 0 then
+                train_info.smoke = {
+                    type = "working",
+                    intensity = 100 * power_use
+                }
+            else
+                train_info.smoke = idle_smoke
             end
 
             -- The game will continue to accelerate the train after we set its speed
@@ -219,5 +271,85 @@ function handle_train(train_info)
         end
 
         train.speed = new_speed_tick * train_direction
+    else
+        -- We're not slowing the train down, but it could be slowing down of its own accord
+        if train_speed_tick < previous_speed then
+            train_info.smoke = idle_smoke
+        elseif previous_speed == train_speed_tick then
+            train_info.smoke = {
+                type = "working",
+                intensity = 100 * calculate_power_proportion(train_info, direction, train_speed_tick, train_speed_tick)
+            }
+        end
+    end
+end
+
+-- Calculate how much of the train's power we're using to accelerate or maintain speed
+function calculate_power_proportion(train_info, direction, old_speed, new_speed)
+    local energy_usage = (train_info.train.weight * (new_speed / direction.air_resistance_multiplier - old_speed) +
+                             train_info.friction_force) * 1000
+    energy_usage = math.max(energy_usage, 0)
+
+    return energy_usage / direction.power
+end
+
+function create_smoke(train_info)
+    -- The engine is effectively off if the train is manual, stopped, with no passenger
+    if train_info.train.manual_mode and train_info.current_speed == 0 and #train_info.train.passengers == 0 then
+        return
+    end
+
+    local smoke = {
+        type = train_info.smoke.type .. "-train-smoke-particle",
+        intensity = math.max(train_info.smoke.intensity, 10)
+    }
+
+    local direction = train_info.forward
+    local other_direction = train_info.backward
+    if train_info.train.speed < 0 then
+        direction = train_info.backward
+        other_direction = train_info.forward
+    end
+
+    -- The locomotives going forward should all put out their % power
+    for _, locomotive in ipairs(direction.locomotives) do
+        locomotive_create_smoke(locomotive.locomotive, smoke)
+    end
+
+    -- If locomotive is a multiple unit (from Multiple Unit Train Control) then show the locomotive working, otherwise idle
+    for _, locomotive in ipairs(other_direction.locomotives) do
+        if locomotive.is_multiple_unit then
+            locomotive_create_smoke(locomotive.locomotive, smoke)
+        else
+            locomotive_create_smoke(
+                locomotive.locomotive, {
+                    type = "idle-train-smoke-particle",
+                    intensity = 5
+                }
+            )
+        end
+    end
+end
+
+function locomotive_create_smoke(locomotive, smoke)
+    if locomotive.burner.currently_burning == nil then
+        return
+    end
+
+    local rand = math.random(100)
+    if rand <= smoke.intensity then
+        locomotive.surface.create_particle(
+            {
+                name = smoke.type,
+                position = locomotive.position,
+                movement = {
+                    0,
+                    0
+                },
+                height = 0.5 + math.random(),
+                vertical_speed = 0,
+                frame_speed = 1
+            }
+        )
     end
 end

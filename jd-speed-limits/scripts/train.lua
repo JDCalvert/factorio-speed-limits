@@ -10,7 +10,12 @@ end
 function register_train(train)
     local train_info = {
         train = train,
-        current_speed_limit = nil
+        current_speed_limit = nil,
+        current_speed = math.abs(train.speed),
+        smoke = {
+            type = "idle",
+            intensity = 5
+        }
     }
 
     calculate_derived(train_info)
@@ -62,10 +67,14 @@ end
 function build_locomotives(locomotives)
     local locomotive_info = {}
     for i, locomotive in ipairs(locomotives) do
+        local is_mu = string.find(locomotive.prototype.name, "-mu")
+
         local energy_usage = locomotive.prototype.get_max_energy_usage()
         locomotive_info[i] = {
+            locomotive = locomotive,
             energy_usage = energy_usage,
-            burner = locomotive.burner
+            burner = locomotive.burner,
+            is_multiple_unit = is_mu ~= nil
         }
     end
 

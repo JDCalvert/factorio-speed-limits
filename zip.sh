@@ -1,1 +1,1 @@
-7z u /c/users/jdcal/factorio/mods/jd-speed-limits_1.0.1.zip -uq0 jd-speed-limits/
+7z u /c/users/jdcal/factorio/mods/jd-speed-limits_1.1.0.zip -uq0 jd-speed-limits/

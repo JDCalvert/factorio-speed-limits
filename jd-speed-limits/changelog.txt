@@ -1,4 +1,11 @@
 ---------------------------------------------------------------------------------------------------
+Version: 1.1.0
+Date: 2025-06-10
+  Features:
+    - Locomotives will produce less smoke when maintaining a reduced speed.
+    - Backwards-facing multiple unit locomotives from the Multiple Unit Train Control will produce smoke.
+    - Added a minimal smoke effect to stationary trains.
+---------------------------------------------------------------------------------------------------
 Version: 1.0.1
 Date: 2025-06-07
   Fixes:
