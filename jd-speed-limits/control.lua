@@ -13,9 +13,9 @@ script.on_init(
 
         local trains = game.train_manager.get_trains({})
         for _, train in ipairs(trains) do
-            register_train(train)
+            local train_info = register_train(train)
             if train.path and train.path.valid then
-                register_path(train)
+                register_path(train_info)
             end
         end
     end
