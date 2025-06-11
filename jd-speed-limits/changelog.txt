@@ -1,8 +1,13 @@
 ---------------------------------------------------------------------------------------------------
+Version: 1.1.2
+Date: 2025-06-11
+  Fixes:
+    - Draw locomotive smoke in the correct position when on an elevated rail.
+---------------------------------------------------------------------------------------------------
 Version: 1.1.1
 Date: 2025-06-10
   Fixes:
-    - Fixed crash when first loading the mod into a game that had trains with paths
+    - Fixed crash when first loading the mod into a game that had trains with paths.
 ---------------------------------------------------------------------------------------------------
 Version: 1.1.0
 Date: 2025-06-10

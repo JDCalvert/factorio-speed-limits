@@ -346,7 +346,7 @@ function locomotive_create_smoke(locomotive, smoke)
                     0,
                     0
                 },
-                height = 0.5 + math.random(),
+                height = locomotive.draw_data.height + 0.5 + math.random(),
                 vertical_speed = 0,
                 frame_speed = 1
             }
